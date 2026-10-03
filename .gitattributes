@@ -1,0 +1,3 @@
+# I .bat devono restare con a-capo Windows (CRLF), anche se scaricati da GitHub.
+*.bat -text
+*.ps1 -text
