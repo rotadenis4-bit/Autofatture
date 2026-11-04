@@ -49,9 +49,14 @@ Windows del server e non compaiono mai in file, log o chat.
 
 ## Numerazione AF
 
-- Una numerazione per cliente e per anno, formato `1/AF` (modificabile con `formato_numero`).
+- Una numerazione per cliente e per anno. Formato `1/AF` di base; per FFOMO e
+  Porto di Clanezzo `AF01 07/26` (`formato_numero` del cliente).
+- Nome file `IT<id trasmittente>_<numero><lettera>.xml`, es. `IT02259870166_50A.xml`:
+  P.IVA per le società, CF di 16 caratteri per ditte individuali e persone fisiche.
+  Se il nome è già stato usato (nuovo invio dopo uno scarto) la lettera diventa B, C...
 - Il punto di partenza è `ultimo_af_iniziale` in `config.yaml`, da leggere una volta sul portale.
-- Un numero **scartato** dallo SDI si riusa per il nuovo invio.
+- Un numero **scartato** dallo SDI si riusa per il nuovo invio, tranne lo scarto
+  **00404** (duplicato): lì lo SDI ha già quel numero, che resta occupato.
 - Se il caricamento si interrompe a metà (`ERRORE_INVIO`), il numero resta
   occupato finché qualcuno non controlla sul portale: se il file non è arrivato,
   nel registro si mette `SCARTATA` e si ricarica il PDF.
@@ -63,10 +68,9 @@ Windows del server e non compaiono mai in file, log o chat.
 1. Copiare il repository sul server, ad esempio in `C:\Autofatture`.
 2. Creare `\\192.168.50.254\Pubblica\AUTOFATTURE\` e mettere lì `config.yaml`,
    copiato da `config.esempio.yaml` e compilato: clienti, P.IVA, cartelle,
-   ultimo numero AF, codice fiscale dell'incaricato Entratel, id del progetto Todoist.
-3. Copiare in `schemi\` lo schema ufficiale scaricato da fatturapa.gov.it:
-   `Schema_del_file_xml_FatturaPA_v1.2.2.xsd` e `xmldsig-core-schema.xsd`.
-   In modalità `ade` senza schema l'invio è bloccato.
+   ultimo numero AF, CF delle ditte individuali, id del progetto Todoist.
+3. Lo schema ufficiale FatturaPA 1.2.3 è già in `schemi\`: senza, in modalità
+   `ade` l'invio è bloccato.
 4. Doppio clic su `windows\INSTALLA_SERVER.bat` con l'utente che userà il programma
    (non "Esegui come amministratore": le credenziali sono legate all'utente).
    Chiede le credenziali a caratteri nascosti e crea le attività pianificate:
@@ -84,7 +88,8 @@ Windows del server e non compaiono mai in file, log o chat.
 | Lettura, controlli, XML con PDF allegato, registro, coda, esiti, archivio, task, riepilogo | pronta, coperta dai test |
 | Modalità `simulazione` (prova completa senza invio) | pronta: è quella predefinita |
 | Login Entratel, lettura ultimo AF, caricamento ed esiti sul portale (`autofatture/ade.py`) | **da completare sul server**: i passaggi vanno registrati sulle pagine reali del portale |
-| Validazione XSD ufficiale | serve copiare lo schema in `schemi\` |
+| Validazione XSD 1.2.3 + controlli pratici della skill *autofatture-estero* | pronta |
+| Autofatture cumulative/riepilogative (Packlink mensile) | non automatiche: skill *autofatture-estero* |
 
 ## Comandi
 

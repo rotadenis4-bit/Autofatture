@@ -91,7 +91,7 @@ def controlla(
             f"Somma delle righe {somma_righe} diversa dal totale della fattura "
             f"{dati.fattura_originale.totale_valuta} {dati.fattura_originale.divisa}"
         )
-    if not importo_nel_testo(dati.fattura_originale.totale_valuta, testo_pdf):
+    if not importo_nel_testo(abs(dati.fattura_originale.totale_valuta), testo_pdf):
         errori.append(
             f"Il totale {dati.fattura_originale.totale_valuta} non compare nel testo del PDF"
         )
@@ -101,7 +101,7 @@ def controlla(
         if re.sub(r"[\s-]", "", dati.fattura_originale.numero).casefold() not in compatto:
             errori.append(f"Il numero fattura {dati.fattura_originale.numero} non compare nel PDF")
 
-    if dati.totale_eur > Decimal(str(config.soglia_importo_eur)):
+    if abs(dati.totale_eur) > Decimal(str(config.soglia_importo_eur)):
         errori.append(
             f"Totale {dati.totale_eur} € oltre la soglia di invio automatico "
             f"({config.soglia_importo_eur:.2f} €)"

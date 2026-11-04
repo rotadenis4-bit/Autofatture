@@ -36,6 +36,7 @@ def cmd_clienti(config, args) -> int:
     for c in config.clienti.values():
         ultimo = registro.ultimo_numero(c.id, anno)
         in_coda = _numeri_in_coda(config, c.id, anno)
+        prossimo = max([ultimo] + in_coda) + 1
         elenco.append({
             "id": c.id,
             "denominazione": c.denominazione,
@@ -43,7 +44,9 @@ def cmd_clienti(config, args) -> int:
             "anno": anno,
             "ultimo_af_registro": ultimo,
             "in_coda": sorted(in_coda),
-            "prossimo_af": max([ultimo] + in_coda) + 1,
+            "prossimo_af": prossimo,
+            "prossimo_numero_documento": c.numero_documento(prossimo, anno),
+            "anagrafica_da_completare": c.campi_da_completare(),
         })
     print(json.dumps(elenco, ensure_ascii=False, indent=2))
     return 0

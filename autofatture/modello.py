@@ -15,7 +15,10 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 TIPI_DOCUMENTO = ("TD17", "TD18", "TD19")
-ALIQUOTE_AMMESSE = (Decimal("4"), Decimal("5"), Decimal("10"), Decimal("22"))
+ALIQUOTE_AMMESSE = (Decimal("0"), Decimal("4"), Decimal("5"), Decimal("10"), Decimal("22"))
+# Unica natura ammessa: N4 esente (commissioni bancarie e di pagamento, art. 10 c.1 n.1).
+NATURE_AMMESSE = {"N4": "Esente art. 10 c. 1 n. 1 DPR 633/72"}
+MODALITA_PAGAMENTO = {"MP01", "MP02", "MP05", "MP08", "MP12", "MP19", "MP23"}
 PAESI_UE = {
     "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "GR", "ES", "FI", "FR",
     "HR", "HU", "IE", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK",
@@ -70,8 +73,16 @@ class Fornitore:
 @dataclass
 class Riga:
     descrizione: str
-    importo_valuta: Decimal
+    importo_valuta: Decimal  # negativo per le note di credito
     aliquota: Decimal = Decimal("22")
+    natura: str = ""
+
+
+@dataclass
+class RappresentanteFiscale:
+    id_paese: str
+    id_codice: str
+    denominazione: str
 
 
 @dataclass
@@ -93,6 +104,9 @@ class DatiAutofattura:
     righe: list[Riga]
     cambio: Decimal | None = None
     data_cambio: date | None = None
+    modalita_pagamento: str = "MP08"
+    iva_estera_addebitata: bool = False
+    rappresentante_fiscale: RappresentanteFiscale | None = None
     caricato_da: str = ""
     controllo_contenuto: dict = field(default_factory=dict)
 
@@ -101,25 +115,24 @@ class DatiAutofattura:
             return euro(riga.importo_valuta)
         return euro(riga.importo_valuta / self.cambio)
 
-    def riepilogo_iva(self) -> list[tuple[Decimal, Decimal, Decimal]]:
-        """(aliquota, imponibile, imposta) per aliquota, in euro."""
-        per_aliquota: dict[Decimal, Decimal] = {}
+    def riepilogo_iva(self) -> list[tuple[Decimal, str, Decimal, Decimal]]:
+        """(aliquota, natura, imponibile, imposta) per aliquota e natura, in euro."""
+        gruppi: dict[tuple[Decimal, str], Decimal] = {}
         for riga in self.righe:
-            per_aliquota[riga.aliquota] = (
-                per_aliquota.get(riga.aliquota, Decimal("0")) + self.imponibile_riga_eur(riga)
-            )
+            chiave = (riga.aliquota, riga.natura)
+            gruppi[chiave] = gruppi.get(chiave, Decimal("0")) + self.imponibile_riga_eur(riga)
         return [
-            (aliquota, imponibile, euro(imponibile * aliquota / 100))
-            for aliquota, imponibile in sorted(per_aliquota.items())
+            (aliquota, natura, imponibile, euro(imponibile * aliquota / 100))
+            for (aliquota, natura), imponibile in sorted(gruppi.items())
         ]
 
     @property
     def imponibile_eur(self) -> Decimal:
-        return sum((r[1] for r in self.riepilogo_iva()), Decimal("0"))
+        return sum((r[2] for r in self.riepilogo_iva()), Decimal("0"))
 
     @property
     def imposta_eur(self) -> Decimal:
-        return sum((r[2] for r in self.riepilogo_iva()), Decimal("0"))
+        return sum((r[3] for r in self.riepilogo_iva()), Decimal("0"))
 
     @property
     def totale_eur(self) -> Decimal:
@@ -185,15 +198,37 @@ def da_dizionario(d: dict) -> DatiAutofattura:
         aliquota = _decimale(r.get("aliquota", 22), f"righe[{i}].aliquota")
         if aliquota not in ALIQUOTE_AMMESSE:
             raise ErroreDati(f"righe[{i}].aliquota: {aliquota} non ammessa")
+        natura = str(r.get("natura") or "").upper()
+        if aliquota == 0 and natura not in NATURE_AMMESSE:
+            raise ErroreDati(f"righe[{i}]: aliquota 0 solo con natura {', '.join(NATURE_AMMESSE)}")
+        if aliquota != 0 and natura:
+            raise ErroreDati(f"righe[{i}]: natura {natura} solo con aliquota 0")
         importo = _decimale(r.get("importo_valuta"), f"righe[{i}].importo_valuta")
-        if importo <= 0:
-            raise ErroreDati(f"righe[{i}].importo_valuta: deve essere positivo")
+        if importo == 0:
+            raise ErroreDati(f"righe[{i}].importo_valuta: non può essere zero")
         righe.append(
             Riga(
                 descrizione=_testo(r.get("descrizione"), f"righe[{i}].descrizione", 1000),
                 importo_valuta=importo,
                 aliquota=aliquota,
+                natura=natura,
             )
+        )
+
+    modalita = str(d.get("modalita_pagamento") or "MP08").upper()
+    if modalita not in MODALITA_PAGAMENTO:
+        raise ErroreDati(f"modalita_pagamento {modalita} non ammessa")
+
+    rappresentante = None
+    if tipo == "TD19":
+        # Senza rappresentante indicato: stessi dati del fornitore (prassi dello Studio).
+        rf = d.get("rappresentante_fiscale") or {}
+        id_paese = _testo(rf.get("id_paese") or paese, "rappresentante_fiscale.id_paese", 2).upper()
+        id_codice = _testo(rf.get("id_codice") or fornitore.id_fiscale, "rappresentante_fiscale.id_codice", 28)
+        rappresentante = RappresentanteFiscale(
+            id_paese=id_paese,
+            id_codice=id_codice,
+            denominazione=_testo(rf.get("denominazione") or fornitore.denominazione, "rappresentante_fiscale.denominazione", 80),
         )
 
     cambio = data_cambio = None
@@ -219,6 +254,9 @@ def da_dizionario(d: dict) -> DatiAutofattura:
         righe=righe,
         cambio=cambio,
         data_cambio=data_cambio,
+        modalita_pagamento=modalita,
+        iva_estera_addebitata=bool(d.get("iva_estera_addebitata", False)),
+        rappresentante_fiscale=rappresentante,
         caricato_da=_testo(d.get("caricato_da"), "caricato_da", 80, obbligatorio=False),
         controllo_contenuto=controllo,
     )

@@ -21,6 +21,8 @@ IN_ATTESA = "IN_ATTESA_ESITO"
 CONSEGNATA = "CONSEGNATA"
 MANCATA_CONSEGNA = "MANCATA_CONSEGNA"
 SCARTATA = "SCARTATA"
+# Scarto 00404: lo SDI ha già un documento con lo stesso numero, che quindi resta occupato.
+DUPLICATO_SDI = "SCARTATA_DUPLICATO"
 SIMULATA = "SIMULATA"
 STATI_OK = (CONSEGNATA, MANCATA_CONSEGNA)
 
@@ -69,7 +71,7 @@ class Registro:
             return [Voce(**{k: r.get(k, "") or "" for k in CAMPI}) for r in csv.DictReader(f, delimiter=";")]
 
     def ultimo_numero(self, cliente_id: str, anno: int) -> int:
-        cliente = self.config.cliente(cliente_id)
+        cliente = self.config.clienti[cliente_id]
         numeri = [cliente.ultimo_af_iniziale.get(anno, 0)]
         numeri += [
             int(v.numero_af)
@@ -78,9 +80,13 @@ class Registro:
         ]
         return max(numeri)
 
-    def prossimo_progressivo_invio(self) -> int:
-        usati = [int(v.progressivo_invio) for v in self.voci() if v.progressivo_invio.isdigit()]
-        return max(usati, default=0) + 1
+    def progressivi_usati(self, cliente_id: str) -> set[str]:
+        """Progressivi dei file già trasmessi per il cliente (il nome file deve essere unico)."""
+        return {
+            v.progressivo_invio.upper()
+            for v in self.voci()
+            if v.cliente_id == cliente_id and v.stato != SIMULATA and v.progressivo_invio
+        }
 
     def duplicato(self, cliente_id: str, fornitore: str, numero_originale: str) -> Voce | None:
         chiave = (fornitore.casefold().strip(), numero_originale.casefold().strip())

@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import traceback
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -75,12 +76,14 @@ class Anteprima:
             f"Fornitore:      {d.fornitore.denominazione} ({d.fornitore.paese})",
             f"Fattura orig.:  n. {d.fattura_originale.numero} del {d.fattura_originale.data:%d/%m/%Y}, "
             f"{d.fattura_originale.totale_valuta} {d.fattura_originale.divisa}",
-            f"Autofattura:    {d.tipo_documento} n. {config.numero_documento(d.numero_af)} "
+            f"Autofattura:    {d.tipo_documento} n. "
+            f"{cliente.numero_documento(d.numero_af, d.data_documento.year) if cliente else d.numero_af} "
             f"del {d.data_documento:%d/%m/%Y}",
         ]
-        for aliquota, imponibile, imposta in d.riepilogo_iva():
-            righe.append(f"IVA {aliquota}%:       imponibile {imponibile} €, imposta {imposta} €")
-        righe.append(f"Totale:         {d.totale_eur} €")
+        for aliquota, natura, imponibile, imposta in d.riepilogo_iva():
+            voce_iva = f"{natura} esente" if natura else f"IVA {aliquota}%"
+            righe.append(f"{voce_iva + ':':<16}imponibile {imponibile} €, imposta {imposta} €")
+        righe.append(f"Totale:         {d.totale_eur} €  (pagamento {d.modalita_pagamento})")
         if self.errori:
             righe.append("\nBLOCCATA:")
             righe += [f"  - {e}" for e in self.errori]
@@ -103,12 +106,18 @@ def prepara(config: Configurazione, file_dati: Path, file_pdf: Path, oggi: date 
 
     xml = None
     avvisi = []
-    if not errori:
-        registro = reg.Registro(config)
-        xml = xml_fatturapa.genera(
-            dati, config.cliente(dati.cliente_id), config, file_pdf, registro.prossimo_progressivo_invio()
+    if dati.iva_estera_addebitata:
+        avvisi.append(
+            "Il fornitore ha addebitato IVA: è indetraibile, l'autofattura la include nell'imponibile "
+            "e la fattura andrebbe fatta riemettere (il server apre un task)"
         )
-        errori += xml_fatturapa.valida(xml)
+    if not errori:
+        cliente = config.cliente(dati.cliente_id)
+        progressivo = xml_fatturapa.progressivo_libero(
+            dati.numero_af, reg.Registro(config).progressivi_usati(cliente.id)
+        )
+        xml = xml_fatturapa.genera(dati, cliente, config, file_pdf, progressivo)
+        errori += xml_fatturapa.valida(xml, xml_fatturapa.nome_file(cliente, progressivo))
         if not (xml_fatturapa.CARTELLA_SCHEMI / xml_fatturapa.FILE_XSD).exists():
             avvisi.append("Schema XSD ufficiale assente qui: la validazione completa la fa il server")
     return Anteprima(dati, errori, avvisi, xml)
@@ -119,7 +128,7 @@ def accoda(config: Configurazione, file_dati: Path, file_pdf: Path) -> Path:
     if anteprima.errori:
         raise Blocco("; ".join(anteprima.errori))
     d = anteprima.dati
-    nome = f"{datetime.now():%Y%m%d-%H%M%S}_{_slug(d.cliente_id, 20)}_AF{d.numero_af:03d}"
+    nome = f"{datetime.now():%Y%m%d-%H%M%S}_{_slug(d.cliente_id, 20)}_AF{d.numero_af:03d}_{uuid.uuid4().hex[:6]}"
     coda = Path(config.percorsi["coda"])
     temporanea = coda / f".{nome}"
     temporanea.mkdir(parents=True)
@@ -191,16 +200,17 @@ def _elabora_pacchetto(config: Configurazione, portale: ade.PortaleADE, cartella
             f"il registro dice {dati.numero_af - 1}: allineare prima di inviare"
         )
 
-    progressivo = registro.prossimo_progressivo_invio()
+    progressivo = xml_fatturapa.progressivo_libero(dati.numero_af, registro.progressivi_usati(cliente.id))
+    nome_xml = xml_fatturapa.nome_file(cliente, progressivo)
     xml = xml_fatturapa.genera(dati, cliente, config, file_pdf, progressivo)
-    errori_xml = xml_fatturapa.valida(xml, richiedi_xsd=config.modalita == "ade")
+    errori_xml = xml_fatturapa.valida(xml, nome_xml, richiedi_xsd=config.modalita == "ade")
     if errori_xml:
         raise Blocco("XML non valido:\n" + "\n".join(errori_xml))
 
     lavoro = Path(config.percorsi["lavoro"]) / cartella.name
     shutil.move(str(cartella), lavoro)
     (lavoro / FILE_PRONTO).unlink(missing_ok=True)
-    file_xml = lavoro / xml_fatturapa.nome_file(config, progressivo)
+    file_xml = lavoro / nome_xml
     file_xml.write_bytes(xml)
 
     voce = reg.Voce(
@@ -210,7 +220,7 @@ def _elabora_pacchetto(config: Configurazione, portale: ade.PortaleADE, cartella
         partita_iva_cliente=cliente.partita_iva,
         anno=str(dati.data_documento.year),
         numero_af=str(dati.numero_af),
-        numero_documento=config.numero_documento(dati.numero_af),
+        numero_documento=cliente.numero_documento(dati.numero_af, dati.data_documento.year),
         tipo_documento=dati.tipo_documento,
         data_documento=dati.data_documento.isoformat(),
         fornitore=dati.fornitore.denominazione,
@@ -220,7 +230,7 @@ def _elabora_pacchetto(config: Configurazione, portale: ade.PortaleADE, cartella
         imponibile_eur=str(dati.imponibile_eur),
         imposta_eur=str(dati.imposta_eur),
         file_xml=file_xml.name,
-        progressivo_invio=str(progressivo),
+        progressivo_invio=progressivo,
         data_invio=datetime.now().isoformat(timespec="seconds"),
         stato=ERRORE_INVIO,
         caricato_da=dati.caricato_da,
@@ -242,6 +252,13 @@ def _elabora_pacchetto(config: Configurazione, portale: ade.PortaleADE, cartella
         return
 
     simulazione = isinstance(portale, ade.PortaleSimulato)
+    if dati.iva_estera_addebitata and not simulazione:
+        _segnala(
+            config,
+            f"Far riemettere la fattura {dati.fattura_originale.numero} di {dati.fornitore.denominazione}",
+            f"Il fornitore ha addebitato IVA (indetraibile). Autofattura {voce.numero_documento} "
+            f"di {cliente.denominazione} emessa su imponibile + IVA addebitata.",
+        )
     registro.aggiorna(
         voce.id,
         stato=reg.SIMULATA if simulazione else reg.IN_ATTESA,
@@ -303,13 +320,21 @@ def controlla_esiti(config: Configurazione, portale: ade.PortaleADE) -> None:
             registro.aggiorna(voce.id, stato=esito.stato, esito=esito.descrizione, pdf_archiviato=str(archiviato))
             log.info("%s %s, PDF in %s", titolo, esito.stato, archiviato)
         else:
-            registro.aggiorna(voce.id, stato=reg.SCARTATA, esito=esito.descrizione)
+            duplicato = "00404" in esito.descrizione
+            registro.aggiorna(voce.id, stato=reg.DUPLICATO_SDI if duplicato else reg.SCARTATA, esito=esito.descrizione)
             lavoro = Path(config.percorsi["lavoro"]) / voce.id
             cartella = _sposta_in_errori(config, lavoro, f"Scartata dallo SDI: {esito.descrizione}") if lavoro.exists() else lavoro
+            if duplicato:
+                istruzioni = (
+                    f"Lo SDI ha già un documento {voce.numero_documento} di questo fornitore e data: "
+                    "verificare sul portale. Se è un vero doppione non fare nulla; altrimenti "
+                    "ricaricare il PDF con il numero AF successivo (questo resta occupato)."
+                )
+            else:
+                istruzioni = f"Il numero {voce.numero_documento} si riusa: correggere e ricaricare il PDF con lo stesso numero."
             _segnala(
                 config, f"{titolo}: SCARTATA dallo SDI",
-                f"Motivo: {esito.descrizione}\nFile in {cartella}\n"
-                f"Il numero {voce.numero_documento} si riusa: correggere e ricaricare il PDF con lo stesso numero.",
+                f"Motivo: {esito.descrizione}\nFile in {cartella}\n{istruzioni}",
             )
 
 
@@ -351,10 +376,11 @@ def riepilogo(config: Configurazione, anno: int, mese: int) -> tuple[str, str]:
     prefisso = f"{anno:04d}-{mese:02d}"
     del_mese = [v for v in voci if v.data_documento.startswith(prefisso) and v.stato != reg.SIMULATA]
 
-    sistemati = {(v.cliente_id, v.anno, v.numero_af) for v in voci if v.stato not in (reg.SCARTATA, ERRORE_INVIO, reg.SIMULATA)}
+    problemi = (reg.SCARTATA, reg.DUPLICATO_SDI, ERRORE_INVIO)
+    sistemati = {(v.cliente_id, v.anno, v.numero_af) for v in voci if v.stato not in problemi + (reg.SIMULATA,)}
     aperti = [
         v for v in voci
-        if v.stato in (reg.SCARTATA, ERRORE_INVIO) and (v.cliente_id, v.anno, v.numero_af) not in sistemati
+        if v.stato in problemi and (v.cliente_id, v.anno, v.numero_af) not in sistemati
     ]
     cartella_errori = Path(config.percorsi["errori"])
     bloccate = sorted(p.name for p in cartella_errori.iterdir() if p.is_dir()) if cartella_errori.exists() else []

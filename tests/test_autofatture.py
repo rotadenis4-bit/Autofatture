@@ -64,7 +64,6 @@ def _dati(**modifiche) -> dict:
 def ambiente(tmp_path, monkeypatch):
     radice = tmp_path / "server"
     esempio = yaml.safe_load(Path("config.esempio.yaml").read_text(encoding="utf-8"))
-    esempio["trasmittente"]["id_codice"] = "RTODNS80A01A794X"
     esempio["percorsi"] = {
         "coda": str(radice / "CODA"),
         "lavoro": str(radice / "LAVORO"),
@@ -74,8 +73,16 @@ def ambiente(tmp_path, monkeypatch):
         "clienti_radice": str(radice / "CLIENTI"),
     }
     esempio["cartella_cliente"] = "{cartella}/{anno}/Contabilità/IVA/Autofatture"
-    esempio["clienti"][0]["partita_iva"] = "01234567890"
-    esempio["clienti"][0]["codice_fiscale"] = "01234567890"
+    esempio["clienti"].append({
+        "id": "studio-rota",
+        "denominazione": "Studio di prova",
+        "partita_iva": "IT01234567890",
+        "codice_fiscale": "RSSMRA80A01A794X",
+        "id_trasmittente": "RSSMRA80A01A794X",
+        "sede": {"indirizzo": "Via Aldo Moro 1/B", "cap": "24030", "comune": "Almenno San Bartolomeo", "provincia": "BG"},
+        "cartella": "STUDIO ROTA",
+        "ultimo_af_iniziale": {2026: 0},
+    })
     file_config = tmp_path / "config.yaml"
     file_config.write_text(yaml.safe_dump(esempio, allow_unicode=True), encoding="utf-8")
     config = configurazione.carica(file_config)
@@ -96,8 +103,10 @@ def _scrivi_dati(cartella: Path, **modifiche) -> Path:
 def test_xml_td17_con_pdf_allegato(ambiente):
     config, pdf, _, _ = ambiente
     dati = da_dizionario(_dati())
-    xml = xml_fatturapa.genera(dati, config.cliente("studio-rota"), config, pdf, 1)
-    assert xml_fatturapa.valida(xml) == []
+    cliente = config.cliente("studio-rota")
+    xml = xml_fatturapa.genera(dati, cliente, config, pdf, "1A")
+    assert (xml_fatturapa.CARTELLA_SCHEMI / xml_fatturapa.FILE_XSD).exists()
+    assert xml_fatturapa.valida(xml, xml_fatturapa.nome_file(cliente, "1A"), richiedi_xsd=True) == []
 
     radice = etree.fromstring(xml)
     assert radice.findtext(".//TipoDocumento") == "TD17"
@@ -105,13 +114,62 @@ def test_xml_td17_con_pdf_allegato(ambiente):
     assert radice.findtext(".//CedentePrestatore//IdPaese") == "US"
     assert radice.findtext(".//CedentePrestatore//IdCodice") == "99999999999"
     assert radice.findtext(".//CessionarioCommittente//IdCodice") == "01234567890"
+    assert radice.findtext(".//IdTrasmittente/IdCodice") == "RSSMRA80A01A794X"
+    assert radice.findtext(".//ProgressivoInvio") == "1A"
+    assert radice.findtext(".//RegimeFiscale") == "RF18"
+    assert radice.findtext(".//ModalitaPagamento") == "MP08"
+    assert radice.findtext(".//DataScadenzaPagamento") == "2026-09-29"
+    assert radice.find(".//RappresentanteFiscale") is None
     assert radice.findtext(".//SoggettoEmittente") == "CC"
     assert radice.findtext(".//ImponibileImporto") == "800.00"
     assert radice.findtext(".//Imposta") == "176.00"
     assert radice.findtext(".//ImportoTotaleDocumento") == "976.00"
     assert radice.findtext(".//DatiFattureCollegate/IdDocumento") == "4DE23481-0012"
     assert base64.b64decode(radice.findtext(".//Allegati/Attachment")) == pdf.read_bytes()
-    assert xml_fatturapa.nome_file(config, 1) == "ITRTODNS80A01A794X_00001.xml"
+    assert xml_fatturapa.nome_file(cliente, "1A") == "ITRSSMRA80A01A794X_1A.xml"
+    assert xml_fatturapa.progressivo_libero(1, {"1A"}) == "1B"
+
+
+def test_formato_numero_per_cliente(ambiente):
+    config, _, _, _ = ambiente
+    assert config.clienti["ffomo"].numero_documento(7, 2026) == "AF01 07/26"
+    assert config.clienti["rogi"].numero_documento(50, 2026) == "50/AF"
+    with pytest.raises(configurazione.ErroreConfigurazione, match="incompleta"):
+        config.cliente("carnera")
+
+
+def test_td19_n4_e_nota_di_credito_validi(ambiente):
+    config, pdf, _, _ = ambiente
+    cliente = config.cliente("studio-rota")
+    td19 = da_dizionario(_dati(
+        tipo_documento="TD19",
+        fornitore={"denominazione": "Chal-Tec GmbH", "paese": "DE", "id_fiscale": "DE123456789",
+                   "indirizzo": "Wallstrasse 16", "comune": "Berlin", "cap": "10179"},
+    ))
+    xml = xml_fatturapa.genera(td19, cliente, config, pdf, "2A")
+    assert xml_fatturapa.valida(xml, xml_fatturapa.nome_file(cliente, "2A"), richiedi_xsd=True) == []
+    radice = etree.fromstring(xml)
+    assert radice.findtext(".//RappresentanteFiscale//IdCodice") == "123456789"
+
+    commissioni = da_dizionario(_dati(
+        fornitore={"denominazione": "Stripe Payments Europe", "paese": "IE", "id_fiscale": "IE3206488LH",
+                   "indirizzo": "1 Grand Canal Street", "comune": "Dublin", "cap": "D02 H210"},
+        righe=[{"descrizione": "Commissioni", "importo_valuta": "800.00", "aliquota": 0, "natura": "N4"}],
+    ))
+    xml = xml_fatturapa.genera(commissioni, cliente, config, pdf, "3A")
+    assert xml_fatturapa.valida(xml, xml_fatturapa.nome_file(cliente, "3A"), richiedi_xsd=True) == []
+    radice = etree.fromstring(xml)
+    assert radice.findtext(".//DatiRiepilogo/Natura") == "N4"
+    assert radice.findtext(".//Imposta") == "0.00"
+    assert radice.findtext(".//CedentePrestatore/Sede/CAP") == "00000"
+
+    nota = da_dizionario(_dati(
+        fattura_originale={"numero": "ES26RC1", "data": "2026-09-29", "divisa": "EUR", "totale_valuta": "-10.00"},
+        righe=[{"descrizione": "Rimborso spedizione", "importo_valuta": "-10.00"}],
+    ))
+    xml = xml_fatturapa.genera(nota, cliente, config, pdf, "4A")
+    assert xml_fatturapa.valida(xml, xml_fatturapa.nome_file(cliente, "4A"), richiedi_xsd=True) == []
+    assert etree.fromstring(xml).findtext(".//ImportoTotaleDocumento") == "-12.20"
 
 
 def test_valuta_estera_convertita_al_cambio(ambiente):
@@ -153,6 +211,7 @@ def test_flusso_completo_simulazione(ambiente):
     voci = reg.Registro(config).voci()
     assert len(voci) == 1 and voci[0].stato == reg.SIMULATA
     assert Path(voci[0].pdf_archiviato).name == "2026-09-29_AF001_TaxDome_4DE23481-0012.pdf"
+    assert (Path(config.percorsi["lavoro"]) / "SIMULAZIONE" / "ITRSSMRA80A01A794X_1A.xml").exists()
     # in simulazione il numero non si consuma
     assert reg.Registro(config).ultimo_numero("studio-rota", 2026) == 0
 
@@ -222,10 +281,29 @@ def test_esiti_reali_archiviazione_e_scarto(ambiente):
     for cartella in Path(config.percorsi["coda"]).iterdir():
         elaborazione._elabora_pacchetto(config, portale, cartella)
     seconda = [v for v in registro.voci() if v.numero_af == "2"][0]
-    portale.esiti[seconda.identificativo_sdi] = elaborazione.ade.Esito("SCARTATA", "00404 fattura duplicata")
+    portale.esiti[seconda.identificativo_sdi] = elaborazione.ade.Esito("SCARTATA", "00305 IdCodice del cessionario non valido")
     elaborazione.controlla_esiti(config, portale)
     assert task and "SCARTATA" in task[-1][0]
     assert registro.ultimo_numero("studio-rota", 2026) == 1
+
+    # Nuovo invio dello stesso numero dopo lo scarto: stesso numero, nome file con la lettera B
+    elaborazione.accoda(config, _scrivi_dati(
+        tmp, numero_af=2,
+        fattura_originale={"numero": "B-7", "data": "2026-09-30", "divisa": "EUR", "totale_valuta": "50.00"},
+        righe=[{"descrizione": "x", "importo_valuta": "50.00"}],
+    ), tmp / "altra.pdf")
+    for cartella in Path(config.percorsi["coda"]).iterdir():
+        elaborazione._elabora_pacchetto(config, portale, cartella)
+    assert [v.file_xml for v in registro.voci() if v.numero_af == "2"] == [
+        "ITRSSMRA80A01A794X_2A.xml", "ITRSSMRA80A01A794X_2B.xml",
+    ]
+
+    # Scarto 00404 (duplicato): il numero resta occupato, si passa al successivo
+    terza = [v for v in registro.voci() if v.file_xml.endswith("_2B.xml")][0]
+    portale.esiti[terza.identificativo_sdi] = elaborazione.ade.Esito("SCARTATA", "00404 fattura duplicata")
+    elaborazione.controlla_esiti(config, portale)
+    assert registro.ultimo_numero("studio-rota", 2026) == 2
+    assert "successivo" in task[-1][1]
 
     oggetto, testo = elaborazione.riepilogo(config, 2026, 9)
     assert "1/AF" in testo and "DA SISTEMARE" in testo

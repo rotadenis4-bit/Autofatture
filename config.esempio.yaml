@@ -1,14 +1,10 @@
 # Configurazione autofatture - copiare in config.yaml (che NON va su GitHub) e compilare.
 # Le credenziali NON vanno qui: si salvano con IMPOSTA_CREDENZIALI.bat.
+# Un cliente con campi DA_COMPLETARE viene bloccato finché non si completa.
 
 # simulazione = prova completa senza invio allo SDI (predefinita)
 # ade         = caricamento reale sul portale Fatture e Corrispettivi
 modalita: simulazione
-
-# Soggetto che trasmette (IdTrasmittente): codice fiscale dell'incaricato Entratel.
-trasmittente:
-  id_paese: IT
-  id_codice: "CODICE_FISCALE_INCARICATO"
 
 percorsi:
   coda: '\\192.168.50.254\Pubblica\AUTOFATTURE\CODA'
@@ -21,7 +17,8 @@ percorsi:
 # Cartella di archivio del PDF originale, sotto clienti_radice.
 cartella_cliente: '{cartella}\{anno}\Contabilità\IVA\Autofatture'
 
-# Numero documento: {n} = progressivo del sezionale AF.
+# Numero documento predefinito; ogni cliente può avere il suo formato_numero.
+# {n} = progressivo AF, {aa} = anno a 2 cifre, {anno} = anno a 4 cifre.
 formato_numero: "{n}/AF"
 
 # Oltre questo totale (imponibile + IVA) niente invio automatico: task Todoist.
@@ -36,19 +33,62 @@ email:
   smtp_host: smtp.office365.com
   smtp_porta: 587
 
-# Solo questi clienti possono avere autofatture. Ogni altra P.IVA viene bloccata.
+# Solo questi clienti possono avere autofatture: ogni altra P.IVA viene bloccata.
+# id_trasmittente: P.IVA per le società; CF di 16 caratteri per ditte individuali
+# e persone fisiche (altrimenti scarto 00300). Va anche nel nome file IT<id>_50A.xml.
+# ultimo_af_iniziale: ultimo numero emesso PRIMA di usare il programma (dal portale ADE).
 clienti:
-  - id: studio-rota
-    denominazione: "Studio Rota"
-    partita_iva: "00000000000"
-    codice_fiscale: "00000000000"
-    sede:
-      indirizzo: "Via Aldo Moro 1/B"
-      cap: "24030"
-      comune: "Almenno San Bartolomeo"
-      provincia: "BG"
-    cartella: "STUDIO ROTA"
-    codice_destinatario: "0000000"
-    # Ultimo numero AF emesso PRIMA di usare il programma (da controllare sul portale ADE).
-    ultimo_af_iniziale:
-      2026: 0
+  - id: carnera
+    denominazione: "Caffè Carnera S.r.l."
+    partita_iva: "12449290969"
+    sede: {indirizzo: DA_COMPLETARE, cap: DA_COMPLETARE, comune: DA_COMPLETARE, provincia: ""}
+    cartella: DA_COMPLETARE
+    ultimo_af_iniziale: {2026: 0}
+
+  - id: rogi
+    denominazione: "RO.GI S.R.L."
+    partita_iva: "02259870166"
+    sede: {indirizzo: "Via Camoretti 1", cap: "24030", comune: "Almenno San Bartolomeo", provincia: BG}
+    cartella: DA_COMPLETARE
+    ultimo_af_iniziale: {2026: 0}
+
+  - id: ffomo
+    denominazione: "FFOMO S.a.s. di Filippelli Lorenzo & C."
+    partita_iva: "04699370161"
+    formato_numero: "AF01 {n:02d}/{aa}"
+    sede: {indirizzo: DA_COMPLETARE, cap: DA_COMPLETARE, comune: "Cisano Bergamasco", provincia: BG}
+    cartella: DA_COMPLETARE
+    ultimo_af_iniziale: {2026: 0}
+
+  - id: porto-clanezzo
+    denominazione: "Porto di Clanezzo S.a.s. di Baggi Davide e Filippini Lorenzo"
+    partita_iva: "04749930162"
+    formato_numero: "AF01 {n:02d}/{aa}"
+    sede: {indirizzo: DA_COMPLETARE, cap: DA_COMPLETARE, comune: "Ubiale Clanezzo", provincia: BG}
+    cartella: DA_COMPLETARE
+    ultimo_af_iniziale: {2026: 0}
+
+  - id: gicer
+    denominazione: "GICER S.r.l. a socio unico"
+    partita_iva: "03655530164"
+    sede: {indirizzo: DA_COMPLETARE, cap: DA_COMPLETARE, comune: DA_COMPLETARE, provincia: ""}
+    cartella: DA_COMPLETARE
+    ultimo_af_iniziale: {2026: 0}
+
+  - id: crema-e-gusto
+    denominazione: "Gelateria Crema e Gusto di Rota Milena"
+    partita_iva: "04556310169"
+    codice_fiscale: DA_COMPLETARE      # ditta individuale: CF 16 caratteri
+    id_trasmittente: DA_COMPLETARE     # = codice fiscale
+    sede: {indirizzo: DA_COMPLETARE, cap: DA_COMPLETARE, comune: DA_COMPLETARE, provincia: ""}
+    cartella: DA_COMPLETARE
+    ultimo_af_iniziale: {2026: 0}
+
+  - id: denis-rota
+    denominazione: "Rota Denis"
+    partita_iva: "04374500165"
+    codice_fiscale: DA_COMPLETARE      # persona fisica: CF 16 caratteri
+    id_trasmittente: DA_COMPLETARE     # = codice fiscale
+    sede: {indirizzo: "Via Aldo Moro 1/B", cap: "24030", comune: "Almenno San Bartolomeo", provincia: BG}
+    cartella: DA_COMPLETARE
+    ultimo_af_iniziale: {2026: 0}
