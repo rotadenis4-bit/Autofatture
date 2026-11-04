@@ -1,0 +1,4 @@
+Copiare qui lo schema ufficiale scaricato da www.fatturapa.gov.it:
+  Schema_del_file_xml_FatturaPA_v1.2.2.xsd
+  xmldsig-core-schema.xsd
+In modalita ade, senza schema l invio e bloccato.
