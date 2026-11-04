@@ -1,0 +1,54 @@
+# Configurazione autofatture - copiare in config.yaml (che NON va su GitHub) e compilare.
+# Le credenziali NON vanno qui: si salvano con IMPOSTA_CREDENZIALI.bat.
+
+# simulazione = prova completa senza invio allo SDI (predefinita)
+# ade         = caricamento reale sul portale Fatture e Corrispettivi
+modalita: simulazione
+
+# Soggetto che trasmette (IdTrasmittente): codice fiscale dell'incaricato Entratel.
+trasmittente:
+  id_paese: IT
+  id_codice: "CODICE_FISCALE_INCARICATO"
+
+percorsi:
+  coda: '\\192.168.50.254\Pubblica\AUTOFATTURE\CODA'
+  lavoro: '\\192.168.50.254\Pubblica\AUTOFATTURE\LAVORO'
+  errori: '\\192.168.50.254\Pubblica\AUTOFATTURE\ERRORI'
+  registro: '\\192.168.50.254\Pubblica\AUTOFATTURE\registro_autofatture.csv'
+  diario: '\\192.168.50.254\Pubblica\AUTOFATTURE\LOG\autofatture.log'
+  clienti_radice: '\\192.168.50.254\Pubblica\CLIENTI'
+
+# Cartella di archivio del PDF originale, sotto clienti_radice.
+cartella_cliente: '{cartella}\{anno}\Contabilità\IVA\Autofatture'
+
+# Numero documento: {n} = progressivo del sezionale AF.
+formato_numero: "{n}/AF"
+
+# Oltre questo totale (imponibile + IVA) niente invio automatico: task Todoist.
+soglia_importo_eur: 20000
+
+todoist:
+  progetto_id: ""   # id del progetto "Autofatture"
+
+email:
+  mittente: info@studiorota.eu
+  destinatari: [info@studiorota.eu]
+  smtp_host: smtp.office365.com
+  smtp_porta: 587
+
+# Solo questi clienti possono avere autofatture. Ogni altra P.IVA viene bloccata.
+clienti:
+  - id: studio-rota
+    denominazione: "Studio Rota"
+    partita_iva: "00000000000"
+    codice_fiscale: "00000000000"
+    sede:
+      indirizzo: "Via Aldo Moro 1/B"
+      cap: "24030"
+      comune: "Almenno San Bartolomeo"
+      provincia: "BG"
+    cartella: "STUDIO ROTA"
+    codice_destinatario: "0000000"
+    # Ultimo numero AF emesso PRIMA di usare il programma (da controllare sul portale ADE).
+    ultimo_af_iniziale:
+      2026: 0
